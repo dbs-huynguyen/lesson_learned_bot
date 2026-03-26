@@ -53,7 +53,7 @@ vectorstore = FAISS.from_documents(
 
 retriever = vectorstore.as_retriever(
     search_type="similarity",
-    search_kwargs={"k": 5, "score_threshold": 0.2},
+    search_kwargs={"k": 5},
 )
 
 template = """You are a strict, citation-focused assistant for a private knowledge base.
@@ -84,6 +84,5 @@ rag_chain = (
     | StrOutputParser()
 )
 
-question = input("Question: ")
-answer = rag_chain.invoke(question)
+answer = rag_chain.invoke("Task #29753 có những nhận xét nào?")
 print(answer)
