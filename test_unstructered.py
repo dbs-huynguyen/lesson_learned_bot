@@ -3,13 +3,6 @@ import pprint
 from langchain_unstructured import UnstructuredLoader
 from unstructured_client.models.shared import Strategy
 from unstructured.cleaners.core import *
-from unstructured.partition.docx import partition_docx
-from unstructured.staging.base import elements_to_json
-
-
-elements = partition_docx(filename="data/BM.10.2.01.BISO - Bao cao HDKP va BHKN_29753.docx", strategy=Strategy.FAST)
-elements_to_json(elements=elements, filename="data/BM.10.2.01.BISO - Bao cao HDKP va BHKN_29753.json")
-exit(0)
 
 
 loader = UnstructuredLoader(
