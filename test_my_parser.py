@@ -1,3 +1,4 @@
+import json
 import pprint
 
 from lib.parser.base import LessonsLearnedParser
@@ -8,6 +9,9 @@ documents = parser.parser(
 )
 
 for doc in documents:
-    pprint.pprint(doc.page_content, width=100000)
-    pprint.pprint(doc.metadata, width=100000)
-    print()
+    # print("Content:")
+    print(f"{doc.page_content}")
+    # print()
+    # print("Metadata:")
+    # print(json.dumps(doc.metadata, ensure_ascii=False, indent=4))
+    # print("-" * 80)

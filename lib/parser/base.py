@@ -11,49 +11,55 @@ from langchain_core.documents import Document
 
 
 class ContentTypeEnum(Enum):
-    INITIAL_CAUSE = "Nguyên nhân ban đầu"
-    ROOT_CAUSE = "Nguyên nhân gốc"
-    SOLUTION = "Giải pháp"
-    LESSON_LEARNED = "Bài học"
-    IMPROVEMENT_PLAN = "Cải tiến"
+    INITIAL_CAUSE = "initial_cause"
+    ROOT_CAUSE = "root_cause"
+    SOLUTION = "solution"
+    LESSON_LEARNED = "lesson_learned"
 
 
-class ProcessRoleEnum(Enum):
-    REVIEWER = "Người xem xét"
-    PERFORMER = "Người thực hiện"
-    REPORTER = "Người báo cáo"
+class ContentTypeRawEnum(Enum):
+    INITIAL_CAUSE = "Nội dung khắc phục"
+    ROOT_CAUSE = "Xác định nguyên nhân gốc"
+    SOLUTION = "Biện pháp khắc phục"
+    LESSON_LEARNED = "Bài học kinh nghiệm ngăn ngừa phát sinh vấn đề tương tự"
+
+
+class RoleEnum(Enum):
+    REVIEWER = "reviewer"
+    PERFORMER = "performer"
+    REPORTER = "reporter"
+
+
+class RoleRawEnum(Enum):
+    REVIEWER = "Người xem xét"
+    PERFORMER = "Người thực hiện"
+    REPORTER = "Người báo cáo"
 
 
 @dataclass
 class LessonsLearnedRaw:
-    title: str | None
-    content: str | None
-    content_type: ContentTypeEnum | None
-    process_role: ProcessRoleEnum | None
-    owner: str | None
-    date: str | None
+    title: str | None = None
+    content: str | None = None
+    content_type: ContentTypeEnum | None = None
+    role: RoleEnum | None = None
+    owner: str | None = None
+    date: str | None = None
     urls: dict[str, tuple[str, str]] | None = None
 
 
-FIELD_MAP = {
-    "Title": "title",
-    "Content": "content",
-    "Content Type": "content_type",
-    "Process Role": "process_role",
-    "Owner": "owner",
-    "Date": "date",
-}
+def to_snake_case(text: str) -> str:
+    for viet_char, replacement in {"đ": "d", "Đ": "D"}.items():
+        text = text.replace(viet_char, replacement)
+    # text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = re.sub(r"[^a-z0-9]+", "_", text.lower())
+    return text.strip("_")
 
 
-class Utils:
-
-    @staticmethod
-    def clean_text(text: str) -> str:
-        text = unicodedata.normalize("NFC", text)
-        text = text.replace("\xa0", " ")
-        text = re.sub(r"\s\s+", " ", text)
-        text = text.replace("\t", " ")
-        return text.strip()
+def repl(match: re.Match[str], urls: dict[str, tuple[str, str]]) -> str:
+    key = f"#{to_snake_case(match.group(2))}"
+    urls[key] = (match.group(1), match.group(2))
+    return key
 
 
 class LessonsLearnedParser:
@@ -84,23 +90,65 @@ class LessonsLearnedParser:
             for cell in row:
                 texts = []
                 for p in cell:
-                    p = unicodedata.normalize("NFC", p)
-                    p = re.sub(r"\t", " ", p)
-                    p = re.sub(r"^-- ", "- ", p)
-                    p = re.sub(r"^ -- ", " - ", p)
-                    p = re.sub(r"^  -- ", "  - ", p)
-                    if p.strip():
-                        if not re.search(r"^- |^ - |^  - ", p):
-                            p = p.strip()
-                            if not re.search(r"^Ngày   /", p):
-                                p = re.sub(r"\s\s+", " ", p)
-                            else:
-                                p = re.sub(r"/ (\d{2,4})", r"/\1", p)
+                    p = unicodedata.normalize("NFKD", p)
+
+                    if re.search(r"^\t+$", p):
+                        p = re.sub(r"^\t+$", "", p)
+                    elif re.search(r"^--\t", p):
+                        p = re.sub(r"^--\t", "* ", p)
+                    elif re.search(r"^\t--\t", p):
+                        p = re.sub(r"^\t--\t", "  * ", p)
+                    elif re.search(r"^\t\t--\t", p):
+                        p = re.sub(r"^\t\t--\t", "    * ", p)
+
+                    if re.search(r"^\s*\* ", p):
                         texts.append(p)
-                text = "\n".join(texts)
+                        continue
+
+                    p = re.sub(r"\s\s+", " ", p.strip())
+
+                    # Replace numbered or lettered list with markdown headers
+                    if re.search(r"^[IVXLCDM]+[\./\)]\s*", p):
+                        p = re.sub(
+                            r"^[IVXLCDM]+[\./\)]\s*([^:\n]*?)\s*(?::\s*(.*))?$",
+                            lambda m: f"## {m.group(1)}:"
+                            + (f"\n{m.group(2)}" if m.group(2) else ""),
+                            p,
+                        )
+                    elif re.search(r"^\d[\./\)]\s*", p):
+                        p = re.sub(
+                            r"^\d[\./\)]\s*([^:\n]*?)\s*(?::\s*(.*))?$",
+                            lambda m: f"### {m.group(1)}:"
+                            + (f"\n{m.group(2)}" if m.group(2) else ""),
+                            p,
+                        )
+                    elif re.search(r"^[a-zA-Z][\./\)]\s*", p):
+                        p = re.sub(
+                            r"^[a-zA-Z][\./\)]\s*([^:\n]*?)\s*(?::\s*(.*))?$",
+                            lambda m: f"#### {m.group(1)}:"
+                            + (f"\n{m.group(2)}" if m.group(2) else ""),
+                            p,
+                        )
+
+                    # Handle case "Ngày   /"
+                    if re.search(r"\s*\d{2}/\s*\d{2}/\s*\d{4}", p):
+                        p = re.sub(r"\s*(\d{2})/\s*(\d{2})/\s*(\d{4})", r" \1/\2/\3", p)
+                    # Handles case unchecked or checked "Không"
+                    elif re.search(r"^\u2610|^\u2612 Không", p):
+                        continue
+                    # Handles case checked "Có"
+                    elif match := re.match(
+                        r"^\u2612 Có[\s\n:]*[\(\[]*(.+?)[\)\]]*$", p, re.DOTALL
+                    ):
+                        if not match:
+                            continue
+                        p = match.group(1).strip()
+
+                    texts.append(p)
+
+                text = "\n".join(p for p in texts if p)
                 if text:
                     flat_row.append(text)
-                    # flat_row.append(Utils.clean_text(text))
             if flat_row:
                 flat_table.append(flat_row)
 
@@ -109,62 +157,60 @@ class LessonsLearnedParser:
     def mapping_data(self, flat_table: list[list[str]]) -> list[LessonsLearnedRaw]:
 
         tables: list[LessonsLearnedRaw] = []
-
         for row in flat_table:
-            data = {FIELD_MAP[key]: None for key in FIELD_MAP}
+            raw_data = {}
+            match = re.match(r"^##\s+([^:]+):\s*(.*)$", row[0], re.DOTALL)
+            if match:
+                raw_data["title"] = match.group(1)
 
-            match = re.match(
-                r"^([IVXLCDM]+\.\s*[^:]+):\s*(.*)$", row[0].replace("\n", "\\n")
-            )
+                if re.search(
+                    rf"^{ContentTypeRawEnum.INITIAL_CAUSE.value}", raw_data["title"]
+                ):
+                    raw_data["content_type"] = ContentTypeEnum.INITIAL_CAUSE.value
+                elif re.search(
+                    rf"^{ContentTypeRawEnum.ROOT_CAUSE.value}", raw_data["title"]
+                ):
+                    raw_data["content_type"] = ContentTypeEnum.ROOT_CAUSE.value
+                elif re.search(
+                    rf"^{ContentTypeRawEnum.SOLUTION.value}", raw_data["title"]
+                ):
+                    raw_data["content_type"] = ContentTypeEnum.SOLUTION.value
+                elif re.search(
+                    rf"^{ContentTypeRawEnum.LESSON_LEARNED.value}", raw_data["title"]
+                ):
+                    raw_data["content_type"] = ContentTypeEnum.LESSON_LEARNED.value
 
-            if match and len(match.groups()) == 2:
-                data["title"] = match.group(1)
-                content = match.group(2).replace("\\n", "\n")
+                content = match.group(2)
 
-                urls: dict[str, str] = {}
-
-                def to_snake_case(text: str) -> str:
-                    for viet_char, replacement in {"đ": "d", "Đ": "D"}.items():
-                        text = text.replace(viet_char, replacement)
-                    text = unicodedata.normalize("NFKD", text)
-                    text = "".join(c for c in text if not unicodedata.combining(c))
-                    text = re.sub(r"[^a-z0-9]+", "_", text.lower())
-                    return text.strip("_")
-
-                def repl(match: re.Match[str]) -> str:
-                    key = f"#{to_snake_case(match.group(2))}"
-                    urls[key] = (match.group(1), match.group(2))
-                    return key
-
-                content = re.sub(r'<a[^>]*href="(.*?)"[^>]*>(.*?)</a>', repl, content)
-
-                data["content"] = content
-                data["urls"] = urls
-
-            if len(row) > 1 and row[1]:
-                match = re.match(
-                    r"^Ngày\s+(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+([A-ZÀ-Ỹ][A-Za-zÀ-ỹ\s]+)$",
-                    row[1],
+                urls: dict[str, tuple[str, str]] = {}
+                content = re.sub(
+                    r'<a[^>]*href="(.*?)"[^>]*>(.*?)</a>',
+                    lambda m: repl(m, urls),
+                    content,
                 )
-                if match and len(match.groups()) == 3:
-                    data["date"] = match.group(1)
-                    data["process_role"] = match.group(2)
-                    data["owner"] = match.group(3)
 
-            if data["title"] and data["content"]:
-                tables.append(LessonsLearnedRaw(**data))
+                raw_data["content"] = content
+                raw_data["urls"] = urls or None
 
-        for item in tables:
-            if re.search(r"^I\.", item.title):
-                item.content_type = ContentTypeEnum.INITIAL_CAUSE.value
-            elif re.search(r"^II\.", item.title):
-                item.content_type = ContentTypeEnum.ROOT_CAUSE.value
-            elif re.search(r"^III\.", item.title):
-                item.content_type = ContentTypeEnum.SOLUTION.value
-            elif re.search(r"^IV\.", item.title):
-                item.content_type = ContentTypeEnum.LESSON_LEARNED.value
-            else:
-                raise ValueError(f"Unknown content type for title: {item.title}")
+            if len(row) > 1:
+                match = re.match(
+                    r"^\S+(\s*\d{0,2}/\s*\d{0,2}/\s*\d{0,4})\n(.+?)(?:\n(.+))?$", row[1]
+                )
+                if match:
+                    raw_data["date"] = match.group(1)
+                    raw_data["owner"] = (
+                        match.group(3).replace("\n", ", ") if match.group(3) else None
+                    )
+
+                    if re.search(rf"{RoleRawEnum.REVIEWER.value}", match.group(2)):
+                        raw_data["role"] = RoleEnum.REVIEWER.value
+                    elif re.search(rf"{RoleRawEnum.PERFORMER.value}", match.group(2)):
+                        raw_data["role"] = RoleEnum.PERFORMER.value
+                    elif re.search(rf"{RoleRawEnum.REPORTER.value}", match.group(2)):
+                        raw_data["role"] = RoleEnum.REPORTER.value
+
+            if raw_data.get("title") and raw_data.get("content"):
+                tables.append(LessonsLearnedRaw(**raw_data))
 
         return tables
 
@@ -184,18 +230,20 @@ class LessonsLearnedParser:
         ) as docx_content:
             tables_3d = self.get_tables(docx_content.body)
             tables_2d = self.flat_3d_to_2d(tables_3d)
+            # print(json.dumps(tables_2d, ensure_ascii=False, indent=2))
             raw_objects = self.mapping_data(tables_2d)
 
             for item in raw_objects:
                 if item.title and item.content:
                     docs.append(
                         Document(
-                            page_content=f"{item.title}{item.content}",
+                            page_content=f"## {item.title}\n{item.content}",
                             metadata=dict(
                                 content_type=item.content_type,
                                 title=item.title,
                                 date=item.date,
                                 owner=item.owner,
+                                role=item.role,
                                 urls=item.urls,
                             ),
                         )
