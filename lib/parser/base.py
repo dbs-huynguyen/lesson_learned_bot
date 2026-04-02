@@ -1,222 +1,340 @@
-from dataclasses import dataclass
 import json
+from pathlib import Path
 import pprint
 import re
-from typing import Union
+from typing import Any
 import unicodedata
+from collections.abc import Callable
 from enum import Enum
+from dataclasses import dataclass
 
 from docx2python import docx2python
 from langchain_core.documents import Document
 
 
-class ContentTypeEnum(Enum):
-    INITIAL_CAUSE = "initial_cause"
-    ROOT_CAUSE = "root_cause"
-    SOLUTION = "solution"
-    LESSON_LEARNED = "lesson_learned"
-
-
-class ContentTypeRawEnum(Enum):
-    INITIAL_CAUSE = "Nội dung khắc phục"
-    ROOT_CAUSE = "Xác định nguyên nhân gốc"
-    SOLUTION = "Biện pháp khắc phục"
-    LESSON_LEARNED = "Bài học kinh nghiệm ngăn ngừa phát sinh vấn đề tương tự"
+class TypeEnum(Enum):
+    PROBLEM = "Problem Description"
+    ROOT_CAUSE = "Root Cause"
+    SOLUTION = "Solution"
+    LESSON_LEARNED = "Lesson Learned"
+    IMPROVEMENT = "Improvement"
+    EVALUATION = "Evaluation"
+    DATE = "Date"
 
 
 class RoleEnum(Enum):
-    REVIEWER = "reviewer"
-    PERFORMER = "performer"
-    REPORTER = "reporter"
+    REVIEWER = "Người xem xét"
+    PERFORMER = "Người thực hiện"
+    REPORTER = "Người báo cáo"
 
 
 class RoleRawEnum(Enum):
-    REVIEWER = "Người xem xét"
-    PERFORMER = "Người thực hiện"
-    REPORTER = "Người báo cáo"
+    REVIEWER = "Người xem xét"
+    PERFORMER = "Người thực hiện"
+    REPORTER = "Người báo cáo"
 
 
 @dataclass
-class LessonsLearnedRaw:
-    title: str | None = None
-    content: str | None = None
-    content_type: ContentTypeEnum | None = None
+class LessonsLearned:
+    page_content: str | None = None
+    type: TypeEnum | None = None
     role: RoleEnum | None = None
     owner: str | None = None
     date: str | None = None
     urls: dict[str, tuple[str, str]] | None = None
 
 
+VIETNAMESE_MAP = {
+    "á": "a",
+    "Á": "A",
+    "à": "a",
+    "À": "A",
+    "ả": "a",
+    "Ả": "A",
+    "ã": "a",
+    "Ã": "A",
+    "ạ": "a",
+    "Ạ": "A",
+    "ă": "a",
+    "Ă": "A",
+    "ắ": "a",
+    "Ắ": "A",
+    "ằ": "a",
+    "Ằ": "A",
+    "ẳ": "a",
+    "Ẳ": "A",
+    "ẵ": "a",
+    "Ẵ": "A",
+    "ặ": "a",
+    "Ặ": "A",
+    "â": "a",
+    "Â": "A",
+    "ấ": "a",
+    "Ấ": "A",
+    "ầ": "a",
+    "Ầ": "A",
+    "ậ": "a",
+    "Ậ": "A",
+    "ẫ": "a",
+    "Ẫ": "A",
+    "é": "e",
+    "É": "E",
+    "è": "e",
+    "È": "E",
+    "ẻ": "e",
+    "Ẻ": "E",
+    "ẽ": "e",
+    "Ẽ": "E",
+    "ẹ": "e",
+    "Ẹ": "E",
+    "ê": "e",
+    "Ê": "E",
+    "ế": "e",
+    "Ế": "E",
+    "ề": "e",
+    "Ề": "E",
+    "ể": "e",
+    "Ể": "E",
+    "ễ": "e",
+    "Ễ": "E",
+    "ệ": "e",
+    "Ệ": "E",
+    "ó": "o",
+    "Ó": "O",
+    "ò": "o",
+    "Ò": "O",
+    "ỏ": "o",
+    "Ỏ": "O",
+    "õ": "o",
+    "Õ": "O",
+    "ọ": "o",
+    "Ọ": "O",
+    "ơ": "o",
+    "Ơ": "O",
+    "ớ": "o",
+    "Ớ": "O",
+    "ờ": "o",
+    "Ờ": "O",
+    "ở": "o",
+    "Ở": "O",
+    "ỡ": "o",
+    "Ỡ": "O",
+    "ợ": "o",
+    "Ợ": "O",
+    "ô": "o",
+    "Ô": "O",
+    "ố": "o",
+    "Ố": "O",
+    "ồ": "o",
+    "Ồ": "O",
+    "ổ": "o",
+    "Ổ": "O",
+    "ỗ": "o",
+    "Ỗ": "O",
+    "ộ": "o",
+    "Ộ": "O",
+    "ú": "u",
+    "Ú": "U",
+    "ù": "u",
+    "Ù": "U",
+    "ủ": "u",
+    "Ủ": "U",
+    "ũ": "u",
+    "Ũ": "U",
+    "ụ": "u",
+    "Ụ": "U",
+    "ư": "u",
+    "Ư": "U",
+    "ứ": "u",
+    "Ứ": "U",
+    "ừ": "u",
+    "Ừ": "U",
+    "ử": "u",
+    "Ử": "U",
+    "ữ": "u",
+    "Ữ": "U",
+    "ự": "u",
+    "Ự": "U",
+    "í": "i",
+    "Í": "I",
+    "ì": "i",
+    "Ì": "I",
+    "ỉ": "i",
+    "Ỉ": "I",
+    "ĩ": "i",
+    "Ĩ": "I",
+    "ị": "i",
+    "Ị": "I",
+    "ý": "y",
+    "Ý": "Y",
+    "ỳ": "y",
+    "Ỳ": "Y",
+    "ỷ": "y",
+    "Ỷ": "Y",
+    "ỹ": "y",
+    "Ỹ": "Y",
+    "ỵ": "y",
+    "Ỵ": "Y",
+    "đ": "d",
+    "Đ": "D",
+}
+
+
 def to_snake_case(text: str) -> str:
-    for viet_char, replacement in {"đ": "d", "Đ": "D"}.items():
+    text = unicodedata.normalize("NFKC", text)
+    for viet_char, replacement in VIETNAMESE_MAP.items():
         text = text.replace(viet_char, replacement)
-    # text = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in text if not unicodedata.combining(c))
     text = re.sub(r"[^a-z0-9]+", "_", text.lower())
     return text.strip("_")
 
 
-def repl(match: re.Match[str], urls: dict[str, tuple[str, str]]) -> str:
+def handle_link(match: re.Match[str], urls: dict[str, list[str]]) -> str:
     key = f"#{to_snake_case(match.group(2))}"
-    urls[key] = (match.group(1), match.group(2))
+    urls[key] = [match.group(1), match.group(2)]
     return key
 
 
+def clean_text(s: str) -> str:
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"___+", "", s)
+    s = s.lstrip("\n").rstrip()
+    s = re.sub(r"^([IVXLCDM\da-z]\s*[\./\)])\s*(.+)", r"\1 \2", s)
+    if match := re.match(r"^(\s*)--\s*(.+)", s):
+        s = f"{match.group(1)}* {match.group(2)}"
+    else:
+        s = s.lstrip("\t").lstrip(" ")
+        if match := re.match(r"^\u2610", s):
+            s = ""
+        elif match := re.match(r"^\u2612\s*Có\s*(?:(.+))?", s):
+            s = match.group(1) or ""
+        elif re.search(r"^Ngày", s):
+            s = re.sub(r"\s+", " ", s)
+    return s
+
 class LessonsLearnedParser:
 
-    def get_tables(self, body: list[list[list[list[str]]]]) -> list[list[list[str]]]:
-
-        tables: list[list[list[str]]] = []
-
-        for section in body:
-            for block in section:
-                if isinstance(block, list) and isinstance(block[0], list):
-                    tables.append(block)
-
-        return tables
-
-    def flat_3d_to_2d(self, tables: list[list[list[str]]]) -> list[list[str]]:
+    def get_table(self, body: list[list[list[list[str]]]], clean_fn: Callable[[str], str] = lambda s: s) -> list[list[list[list[str]]]]:
         if not (
-            isinstance(tables[0], list)
-            and isinstance(tables[0][0], list)
-            and isinstance(tables[0][0][0], str)
+            isinstance(body, list)
+            and isinstance(body[0], list)
+            and isinstance(body[0][0], list)
+            and isinstance(body[0][0][0], list)
+            and isinstance(body[0][0][0][0], str)
+        ):
+            raise ValueError("Input must be a 4D list of strings")
+
+        body[:] = [
+            [
+                row
+                for raw_row in table
+                if (
+                    row := [
+                        [cleaned for s in c if (cleaned := clean_fn(s))]
+                        for c in raw_row
+                    ]
+                )
+            ]
+            for table in body
+            if all(len(row) >= 2 for row in table)
+        ]
+
+        return body
+
+    def transform(self, table: list[list[list[str]]], file_path: Path | None = None) -> list[dict[str, Any]]:
+        if not (
+            isinstance(table[0], list)
+            and isinstance(table[0][0], list)
+            and isinstance(table[0][0][0], str)
         ):
             raise ValueError("Input must be a 3D list of strings")
 
-        flat_table: list[list[str]] = []
+        company, project, task = None, None, None
+        if match := re.match(
+            r"^BM.10.2.01.BISO - Bao cao HDKP va BHKN-(.+[^_]*)_(.+[^_]*)_(.+[^_]*)",
+            file_path.stem,
+        ):
+            company = match.group(1)
+            project = match.group(2)
+            task = match.group(3)
 
-        for row in tables:
-            flat_row = []
-            for cell in row:
-                texts = []
-                for p in cell:
-                    p = unicodedata.normalize("NFKD", p)
+        # print(json.dumps(table, ensure_ascii=False, indent=4))
+        # exit()
 
-                    if re.search(r"^\t+$", p):
-                        p = re.sub(r"^\t+$", "", p)
-                    elif re.search(r"^--\t", p):
-                        p = re.sub(r"^--\t", "* ", p)
-                    elif re.search(r"^\t--\t", p):
-                        p = re.sub(r"^\t--\t", "  * ", p)
-                    elif re.search(r"^\t\t--\t", p):
-                        p = re.sub(r"^\t\t--\t", "    * ", p)
+        results: list[dict[str, Any]] = []
+        for row in table:
+            if len(row[0]) == 0:
+                continue
 
-                    if re.search(r"^\s*\* ", p):
-                        texts.append(p)
-                        continue
+            obj = {
+                "company": company,
+                "project": project,
+                "task": task,
+            }
 
-                    p = re.sub(r"\s\s+", " ", p.strip())
+            heading1 = row[0].pop(0)
+            if re.search(r"^I[\./\)]", heading1):
+                obj["type"] = TypeEnum.PROBLEM.value
+            elif re.search(r"^II[\./\)]", heading1):
+                obj["type"] = TypeEnum.ROOT_CAUSE.value
+            elif re.search(r"^III[\./\)]", heading1):
+                obj["type"] = TypeEnum.SOLUTION.value
+            elif re.search(r"^IV[\./\)]", heading1):
+                obj["type"] = TypeEnum.LESSON_LEARNED.value
+            elif re.search(r"^V[\./\)]", heading1):
+                obj["type"] = TypeEnum.EVALUATION.value
 
-                    # Replace numbered or lettered list with markdown headers
-                    if re.search(r"^[IVXLCDM]+[\./\)]\s*", p):
-                        p = re.sub(
-                            r"^[IVXLCDM]+[\./\)]\s*([^:\n]*?)\s*(?::\s*(.*))?$",
-                            lambda m: f"## {m.group(1)}:"
-                            + (f"\n{m.group(2)}" if m.group(2) else ""),
-                            p,
-                        )
-                    elif re.search(r"^\d[\./\)]\s*", p):
-                        p = re.sub(
-                            r"^\d[\./\)]\s*([^:\n]*?)\s*(?::\s*(.*))?$",
-                            lambda m: f"### {m.group(1)}:"
-                            + (f"\n{m.group(2)}" if m.group(2) else ""),
-                            p,
-                        )
-                    elif re.search(r"^[a-zA-Z][\./\)]\s*", p):
-                        p = re.sub(
-                            r"^[a-zA-Z][\./\)]\s*([^:\n]*?)\s*(?::\s*(.*))?$",
-                            lambda m: f"#### {m.group(1)}:"
-                            + (f"\n{m.group(2)}" if m.group(2) else ""),
-                            p,
-                        )
-
-                    # Handle case "Ngày   /"
-                    if re.search(r"\s*\d{2}/\s*\d{2}/\s*\d{4}", p):
-                        p = re.sub(r"\s*(\d{2})/\s*(\d{2})/\s*(\d{4})", r" \1/\2/\3", p)
-                    # Handles case unchecked or checked "Không"
-                    elif re.search(r"^\u2610|^\u2612 Không", p):
-                        continue
-                    # Handles case checked "Có"
-                    elif match := re.match(
-                        r"^\u2612 Có[\s\n:]*[\(\[]*(.+?)[\)\]]*$", p, re.DOTALL
-                    ):
-                        if not match:
-                            continue
-                        p = match.group(1).strip()
-
-                    texts.append(p)
-
-                text = "\n".join(p for p in texts if p)
-                if text:
-                    flat_row.append(text)
-            if flat_row:
-                flat_table.append(flat_row)
-
-        return flat_table
-
-    def mapping_data(self, flat_table: list[list[str]]) -> list[LessonsLearnedRaw]:
-
-        tables: list[LessonsLearnedRaw] = []
-        for row in flat_table:
-            raw_data = {}
-            match = re.match(r"^##\s+([^:]+):\s*(.*)$", row[0], re.DOTALL)
-            if match:
-                raw_data["title"] = match.group(1)
-
-                if re.search(
-                    rf"^{ContentTypeRawEnum.INITIAL_CAUSE.value}", raw_data["title"]
+            sentences = []
+            urls = {}
+            for i, p in enumerate(row[0][::-1]):
+                if (not sentences and re.search(r"^\d[\./\)]", p)) or (
+                    sentences
+                    and re.search(r"^\d[\./\)]", sentences[-1])
+                    and re.search(r"^\d[\./\)]", p)
                 ):
-                    raw_data["content_type"] = ContentTypeEnum.INITIAL_CAUSE.value
-                elif re.search(
-                    rf"^{ContentTypeRawEnum.ROOT_CAUSE.value}", raw_data["title"]
-                ):
-                    raw_data["content_type"] = ContentTypeEnum.ROOT_CAUSE.value
-                elif re.search(
-                    rf"^{ContentTypeRawEnum.SOLUTION.value}", raw_data["title"]
-                ):
-                    raw_data["content_type"] = ContentTypeEnum.SOLUTION.value
-                elif re.search(
-                    rf"^{ContentTypeRawEnum.LESSON_LEARNED.value}", raw_data["title"]
-                ):
-                    raw_data["content_type"] = ContentTypeEnum.LESSON_LEARNED.value
+                    continue
 
-                content = match.group(2)
+                if re.search(r"^[\da-z][\./\)]", p) and i + 1 < len(row[0]):
+                    p = f"\n{p}"
 
-                urls: dict[str, tuple[str, str]] = {}
-                content = re.sub(
-                    r'<a[^>]*href="(.*?)"[^>]*>(.*?)</a>',
-                    lambda m: repl(m, urls),
-                    content,
-                )
-
-                raw_data["content"] = content
-                raw_data["urls"] = urls or None
-
-            if len(row) > 1:
-                match = re.match(
-                    r"^\S+(\s*\d{0,2}/\s*\d{0,2}/\s*\d{0,4})\n(.+?)(?:\n(.+))?$", row[1]
-                )
-                if match:
-                    raw_data["date"] = match.group(1)
-                    raw_data["owner"] = (
-                        match.group(3).replace("\n", ", ") if match.group(3) else None
+                elif re.search(r"""<a[^>]*.+</a>""", p):
+                    p = re.sub(
+                        r"""<a[^>]*href=["'](.*?)["'][^>]*>(.*?)</a>""",
+                        lambda m: handle_link(m, urls),
+                        p,
                     )
 
-                    if re.search(rf"{RoleRawEnum.REVIEWER.value}", match.group(2)):
-                        raw_data["role"] = RoleEnum.REVIEWER.value
-                    elif re.search(rf"{RoleRawEnum.PERFORMER.value}", match.group(2)):
-                        raw_data["role"] = RoleEnum.PERFORMER.value
-                    elif re.search(rf"{RoleRawEnum.REPORTER.value}", match.group(2)):
-                        raw_data["role"] = RoleEnum.REPORTER.value
+                sentences.append(f"{p}  ")
 
-            if raw_data.get("title") and raw_data.get("content"):
-                tables.append(LessonsLearnedRaw(**raw_data))
+            date, role, owner = None, None, None
+            if len(row) == 2 and len(row[1]) > 0:
 
-        return tables
+                if match := re.match(r"^Ngày\s*(\d{2}/\s*\d{2}/\s*\d{4})", row[1][0]):
+                    date = match.group(1)
+
+                if re.search(rf"{RoleEnum.REVIEWER.value}", row[1][1]):
+                    role = RoleEnum.REVIEWER.name.lower()
+                elif re.search(rf"{RoleEnum.PERFORMER.value}", row[1][1]):
+                    role = RoleEnum.PERFORMER.name.lower()
+                elif re.search(rf"{RoleEnum.REPORTER.value}", row[1][1]):
+                    role = RoleEnum.REPORTER.name.lower()
+
+                if len(row[1]) == 3:
+                    owner = row[1][2]
+
+            obj["page_content"] = "\n".join(sentences[::-1])
+            obj["urls"] = urls or None
+            obj["date"] = date
+            obj["role"] = role
+            obj["redactor"] = owner
+
+            results.append(obj)
+
+        return results
 
     def parser(
         self,
-        file_path: str,
+        file_path: Path,
         image_folder: str | None = None,
         *,
         duplicate_merged_cells: bool = False,
@@ -228,23 +346,25 @@ class LessonsLearnedParser:
             html=False,
             duplicate_merged_cells=duplicate_merged_cells,
         ) as docx_content:
-            tables_3d = self.get_tables(docx_content.body)
-            tables_2d = self.flat_3d_to_2d(tables_3d)
-            # print(json.dumps(tables_2d, ensure_ascii=False, indent=2))
-            raw_objects = self.mapping_data(tables_2d)
+            body_cleaned = self.get_table(docx_content.body, clean_text)
+            raw_objs = self.transform(body_cleaned[0], file_path=file_path)
+            print(json.dumps(raw_objs, ensure_ascii=False, indent=4))
+            exit()
 
-            for item in raw_objects:
-                if item.title and item.content:
+            for obj in raw_objs:
+                if obj["page_content"]:
                     docs.append(
                         Document(
-                            page_content=f"## {item.title}\n{item.content}",
+                            page_content=f"{obj['page_content']}",
                             metadata=dict(
-                                content_type=item.content_type,
-                                title=item.title,
-                                date=item.date,
-                                owner=item.owner,
-                                role=item.role,
-                                urls=item.urls,
+                                company=obj['company'],
+                                project=obj['project'],
+                                task=obj['task'],
+                                type=obj['type'],
+                                urls=obj['urls'],
+                                date=obj['date'],
+                                role=obj['role'],
+                                redactor=obj['redactor'],
                             ),
                         )
                     )

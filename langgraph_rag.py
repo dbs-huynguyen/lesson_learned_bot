@@ -15,18 +15,13 @@ from langchain_docling.loader import ExportType
 from docling.chunking import HybridChunker
 
 
-loader = DoclingLoader(
-    file_path="data/BM.10.2.01.BISO - Bao cao HDKP va BHKN.docx",
-    export_type=ExportType.MARKDOWN,
-    md_export_kwargs={},
+loader = DirectoryLoader(
+    path="./data",
+    glob="**/*.docx",
+    loader_cls=UnstructuredFileLoader,
+    show_progress=True,
+    use_multithreading=True,
 )
-# loader = DirectoryLoader(
-#     path="./data",
-#     glob="**/*.docx",
-#     loader_cls=UnstructuredFileLoader,
-#     show_progress=True,
-#     use_multithreading=True,
-# )
 docs = loader.load()
 
 for d in docs:
